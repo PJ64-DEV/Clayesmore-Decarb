@@ -178,29 +178,6 @@ def calculate_metrics(df, hours_map, days):
     total_co2 = (total_kwh * KG_CO2_PER_KWH) / 1000
     return total_cost, total_kwh, total_co2, df_calc
 
-def initialize_state():
-    """Initializes session state with default values for each parameter."""
-    if 'initialized' not in st.session_state:
-        st.session_state.days_per_year = 220.0
-        st.session_state.lease_term = 5
-        st.session_state.interest_rate = 5.0
-        st.session_state.deposit = 0
-
-        # Initialize hours for each area
-        for area, hours in DEFAULT_HOURS_MAP.items():
-            st.session_state[f"hours_{area}"] = float(hours)
-        
-        st.session_state.initialized = True
-
-def reset_state_to_defaults():
-    """Resets all session state values to their defaults."""
-    st.session_state.days_per_year = 220.0
-    st.session_state.lease_term = 5
-    st.session_state.interest_rate = 5.0
-    st.session_state.deposit = 0
-    for area, hours in DEFAULT_HOURS_MAP.items():
-        st.session_state[f"hours_{area}"] = float(hours)
-
 # --- App Constants & Initialization ---
 df_existing_base, df_proposed_base = load_and_process_data()
 PROJECT_NAME = "Clayesmore School"
@@ -210,17 +187,32 @@ PROJECT_INSTALL_COST = 155915.00
 DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
 UNIQUE_AREAS = sorted(df_proposed_base['Area'].unique())
 
-# Initialize the session state
-initialize_state()
+# Set default values for the session
+def set_defaults():
+    st.session_state.days_per_year = 220.0
+    st.session_state.lease_term_months = 60 # Default to 60 months
+    st.session_state.interest_rate = 5.0
+    st.session_state.deposit = 0
+    for area, hours in DEFAULT_HOURS_MAP.items():
+        st.session_state[f"hours_{area}"] = float(hours)
 
-# === SIDEBAR ===
+# Initialize state if it's the first run
+if 'days_per_year' not in st.session_state:
+    set_defaults()
+
+# --- SIDEBAR ---
+# This button is placed first. When clicked, it resets state and forces a rerun.
+if st.sidebar.button("Reset Defaults", use_container_width=True):
+    set_defaults()
+    st.experimental_rerun()
+
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Adjust assumptions to see the live impact.")
 
 st.sidebar.number_input(
-    "🗓️ Days of Use per Year (All Areas)",
+    "🗓️ Days of Use per Year",
     min_value=1.0, max_value=365.0,
-    step=0.5, format="%.1f", key="days_per_year"
+    step=1.0, format="%.0f", key="days_per_year"
 )
 
 with st.sidebar.expander("💡 Detailed Usage (Hours/Day)", expanded=False):
@@ -232,32 +224,29 @@ with st.sidebar.expander("💡 Detailed Usage (Hours/Day)", expanded=False):
 
 st.sidebar.divider()
 st.sidebar.markdown("### Funding Assumptions")
-st.sidebar.number_input("Lease Term (Years)", min_value=1, max_value=20, step=1, key="lease_term")
+st.sidebar.number_input("Lease Term (Months)", min_value=1, max_value=240, step=1, key="lease_term_months")
 st.sidebar.number_input("Interest Rate (%)", min_value=0.0, max_value=25.0, step=0.1, format="%.1f", key="interest_rate")
 st.sidebar.number_input(f"Upfront Deposit (£)", min_value=0, max_value=int(PROJECT_INSTALL_COST), step=1000, key="deposit")
 
-st.sidebar.divider()
-if st.sidebar.button("Reset Defaults", use_container_width=True):
-    reset_state_to_defaults()
-    st.experimental_rerun()
-
 # === CALCULATIONS ===
-# Create the hours map for calculations from the session state
 hours_map_from_state = {area: st.session_state[f"hours_{area}"] for area in UNIQUE_AREAS}
+days_per_year = st.session_state.days_per_year
+lease_term_months = st.session_state.lease_term_months
+interest_rate = st.session_state.interest_rate
+deposit = st.session_state.deposit
 
-current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, hours_map_from_state, st.session_state.days_per_year)
-led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, hours_map_from_state, st.session_state.days_per_year)
+current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, hours_map_from_state, days_per_year)
+led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, hours_map_from_state, days_per_year)
 estimated_savings_cost = current_cost - led_cost
 estimated_savings_kwh = current_kwh - led_kwh
 estimated_savings_co2 = current_co2 - led_co2
 
-loan_amount = PROJECT_INSTALL_COST - st.session_state.deposit
-if st.session_state.interest_rate == 0:
-    monthly_payment = loan_amount / (st.session_state.lease_term * 12) if st.session_state.lease_term > 0 else 0
+loan_amount = PROJECT_INSTALL_COST - deposit
+if interest_rate == 0:
+    monthly_payment = loan_amount / lease_term_months if lease_term_months > 0 else 0
 else:
-    monthly_rate = (st.session_state.interest_rate / 100) / 12
-    n_periods = st.session_state.lease_term * 12
-    monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount) if n_periods > 0 else 0
+    monthly_rate = (interest_rate / 100) / 12
+    monthly_payment = npf.pmt(monthly_rate, lease_term_months, -loan_amount) if lease_term_months > 0 else 0
 annual_funding_cost = monthly_payment * 12
 net_cash_flow = estimated_savings_cost - annual_funding_cost
 
@@ -267,26 +256,12 @@ st.markdown("An interactive proposal for a full-site LED lighting upgrade. Use t
 st.header("Executive Summary")
 st.markdown("---")
 
-# Tier 1: Current
-st.subheader("Current Annual Consumption & Spend")
+# Tier 1 & 2
+st.subheader("Current vs. Estimated Annual Performance")
 col1, col2, col3 = st.columns(3)
-col1.metric("Energy Consumption", f"{current_kwh:,.0f} kWh")
-col2.metric("Carbon Emissions", f"{current_co2:,.1f} Tonnes CO₂e")
-col3.metric("Financial Expenditure", f"£{current_cost:,.0f}")
-
-# Tier 2: Estimated Post-Upgrade
-st.subheader("Estimated Annual Consumption & Spend (Post-Upgrade)")
-col1, col2, col3 = st.columns(3)
-col1.metric("Est. Energy Consumption", f"{led_kwh:,.0f} kWh")
-col2.metric("Est. Carbon Emissions", f"{led_co2:,.1f} Tonnes CO₂e")
-col3.metric("Est. Financial Expenditure", f"£{led_cost:,.0f}")
-
-# Tier 3: Savings
-st.subheader("Total Estimated Annual Savings")
-col1, col2, col3 = st.columns(3)
-col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh", f"{-estimated_savings_kwh:,.0f}", delta_color="inverse")
-col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e", f"{-estimated_savings_co2:,.1f}", delta_color="inverse")
-col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}", f"£{-estimated_savings_cost:,.0f}", delta_color="inverse")
+col1.metric("Energy Consumption (kWh)", f"{led_kwh:,.0f}", f"{-estimated_savings_kwh:,.0f} kWh")
+col2.metric("Carbon Emissions (Tonnes CO₂e)", f"{led_co2:,.1f}", f"{-estimated_savings_co2:,.1f} T")
+col3.metric("Financial Expenditure (£)", f"£{led_cost:,.0f}", f"£{-estimated_savings_cost:,.0f}")
 
 st.markdown("---")
 # Tier 4: The Financial Case
@@ -306,17 +281,26 @@ st.divider()
 st.header("Visual Analysis")
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
 area_savings.columns = ['Area', 'Savings (£)']
-positive_area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
-try:
-    if not positive_area_savings.empty:
-        st.subheader("Savings Contribution by Area")
-        fig_treemap = px.treemap(positive_area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
-                                 color='Savings (£)', color_continuous_scale='Greens',
-                                 title="Breakdown of Estimated Annual Savings")
-        # FIX: Corrected typo 'percent-root' to 'percent root'
-        fig_treemap.update_traces(textinfo="label+value+percent root")
-        st.plotly_chart(fig_treemap, use_container_width=True)
-    else:
-        st.info("No net savings to display in the chart based on current settings.")
-except Exception as e:
-    st.error(f"Could not display the savings breakdown chart. Please adjust settings.")
+positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
+
+if not positive_area_savings.empty:
+    st.subheader("Savings Contribution by Area")
+    # Sort for the bar chart so largest is at the top
+    positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
+    
+    fig_bar = px.bar(
+        positive_area_savings,
+        x='Savings (£)',
+        y='Area',
+        orientation='h',
+        title="Breakdown of Estimated Annual Savings",
+        labels={'Savings (£)': 'Annual Savings (£)', 'Area': ''},
+        text='Savings (£)'
+    )
+    fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='inside')
+    fig_bar.update_layout(
+        uniformtext_minsize=8, uniformtext_mode='hide', yaxis={'categoryorder':'total ascending'}
+    )
+    st.plotly_chart(fig_bar, use_container_width=True)
+else:
+    st.info("No net savings to display in the chart based on current settings.")
