@@ -147,54 +147,43 @@ WC,18W DOWNLIGHT,32,18,0.58,4,220,507,£126.72,0.12
 
 @st.cache_data
 def load_and_process_data():
-    """Parses the raw text data into two clean pandas DataFrames."""
     lines = RAW_DATA.strip().split('\n')
-    
-    # Find split point
     split_index = lines.index("PROPOSED FITTINGS")
-    
     existing_data = "\n".join(lines[1:split_index])
     proposed_data = "\n".join(lines[split_index+1:])
-    
     df_existing = pd.read_csv(StringIO(existing_data))
     df_proposed = pd.read_csv(StringIO(proposed_data))
     
-    # Clean column names
     for df in [df_existing, df_proposed]:
-        df.columns = [col.strip() for col in df.columns]
-
-    # Clean numeric columns
-    cost_col_name = 'Existing Running Cost' if 'Existing Running Cost' in df_existing.columns else 'Proposed Running Cost'
-    
-    for df in [df_existing, df_proposed]:
+        df.columns = [col.strip().replace('"', '') for col in df.columns]
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].str.strip().str.replace('"', '')
         cost_col = [col for col in df.columns if 'Running Cost' in col][0]
         df[cost_col] = df[cost_col].replace({r'[£,]': ''}, regex=True).astype(float)
-        df['Quantity'] = pd.to_numeric(df['Quantity'])
-        df['Wattage'] = pd.to_numeric(df['Wattage'])
-        df['Hours per Day'] = pd.to_numeric(df['Hours per Day'])
-        df['Days'] = pd.to_numeric(df['Days'])
-
+        numeric_cols = ['Quantity', 'Wattage', 'Hours per Day', 'Days']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
     return df_existing, df_proposed
 
-# Load the data
 df_existing_base, df_proposed_base = load_and_process_data()
 
-# --- Project-Specific Global Constants ---
 PROJECT_NAME = "Clayesmore School"
 COST_PER_KWH = 0.25
 KG_CO2_PER_KWH = 0.233
-PROJECT_INSTALL_COST = 155915.00 # From your "Total Refurbishment Cost"
-# Assuming no separate annual maintenance cost as it's baked into fitting failures
+PROJECT_INSTALL_COST = 155915.00
 ANNUAL_MAINTENANCE_OLD = 0 
 ANNUAL_MAINTENANCE_LED = 0
 
-# --- Default Parameters from your "Proposed" scenario ---
-# These are used for the "Reset" button
+# Create a dictionary of the default hours per area from your original "proposed" data
+# This is used for the "Reset" button
+DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
+
 DEFAULT_PARAMS = {
-    # We will store the original hours per day for each Area from the 'proposed' table
-    "hours_per_day_map": df_proposed_base.set_index('Area')['Hours per Day'].to_dict(),
+    "hours_per_day_map": DEFAULT_HOURS_MAP.copy(),
     "days_per_year": 220,
-    "interest_rate": 5.0, # From your savings table example
+    "interest_rate": 5.0,
     "lease_term": 5,
     "deposit": 0,
 }
@@ -204,8 +193,6 @@ DEFAULT_PARAMS = {
 # =================================================================================================
 if 'params' not in st.session_state:
     st.session_state.params = DEFAULT_PARAMS.copy()
-    st.session_state.global_hours_override = False
-    st.session_state.global_days_override = False
 
 # =================================================================================================
 # SIDEBAR - INTERACTIVE CONTROLS
@@ -213,41 +200,27 @@ if 'params' not in st.session_state:
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Use the controls below to model different scenarios.")
 
-# Create a copy of the base dataframes to modify based on user input
-df_existing = df_existing_base.copy()
-df_proposed = df_proposed_base.copy()
-
-# --- Operational Assumptions ---
-st.sidebar.markdown("### Operational Assumptions")
-days_per_year_input = st.sidebar.slider(
-    "🗓️ Days of Use per Year", 1, 365, st.session_state.params['days_per_year']
+# --- General Assumptions ---
+st.session_state.params['days_per_year'] = st.sidebar.slider(
+    "🗓️ Days of Use per Year (All Areas)", 1, 365, st.session_state.params['days_per_year']
 )
 
-# This logic allows for either a global override or using the defaults
-# If the user touches the slider, we switch to a global override
-if days_per_year_input != st.session_state.params['days_per_year']:
-    st.session_state.global_days_override = True
-    st.session_state.params['days_per_year'] = days_per_year_input
-    df_existing['Days'] = days_per_year_input
-    df_proposed['Days'] = days_per_year_input
-elif st.session_state.global_days_override:
-     df_existing['Days'] = st.session_state.params['days_per_year']
-     df_proposed['Days'] = st.session_state.params['days_per_year']
-
-hours_per_day_input = st.sidebar.slider(
-    "💡 Avg. Hours of Use per Day (Global)", 1, 24, int(pd.Series(st.session_state.params['hours_per_day_map']).mean())
-)
-
-# This slider provides a global override for hours per day
-st.session_state.params['hours_per_day_map'] = {area: hours_per_day_input for area in df_proposed['Area'].unique()}
-df_existing['Hours per Day'] = df_existing['Area'].map(st.session_state.params['hours_per_day_map']).fillna(hours_per_day_input)
-df_proposed['Hours per Day'] = df_proposed['Area'].map(st.session_state.params['hours_per_day_map']).fillna(hours_per_day_input)
-
+# --- NEW FEATURE: Detailed Operational Assumptions with individual sliders per area ---
+with st.sidebar.expander("💡 Detailed Operational Assumptions", expanded=True):
+    st.markdown("Adjust the average hours of use per day for each area.")
+    
+    # Create a slider for each unique area
+    unique_areas = sorted(df_proposed_base['Area'].unique())
+    for area in unique_areas:
+        default_hour = DEFAULT_HOURS_MAP.get(area, 8) # Get default, or use 8 if not found
+        # Use the area name as the key for the slider's value in session state
+        st.session_state.params['hours_per_day_map'][area] = st.slider(
+            f"{area}", 1, 24, st.session_state.params['hours_per_day_map'].get(area, default_hour)
+        )
 
 # --- Funding Assumptions ---
 st.sidebar.divider()
 st.sidebar.markdown("### Funding Assumptions")
-
 st.session_state.params['lease_term'] = st.sidebar.slider("Lease Term (Years)", 1, 10, st.session_state.params['lease_term'])
 st.session_state.params['interest_rate'] = st.sidebar.slider("Interest Rate (%)", 0.0, 15.0, st.session_state.params['interest_rate'], 0.1)
 st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (£)", 0, int(PROJECT_INSTALL_COST), st.session_state.params['deposit'], 1000)
@@ -255,45 +228,42 @@ st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (
 # --- Sidebar Buttons ---
 if st.sidebar.button("Reset to Defaults", use_container_width=True):
     st.session_state.params = DEFAULT_PARAMS.copy()
-    st.session_state.global_hours_override = False
-    st.session_state.global_days_override = False
     st.experimental_rerun()
-
 
 # =================================================================================================
 # DYNAMIC CALCULATIONS
 # =================================================================================================
-def calculate_metrics(df, annual_maintenance):
-    """Calculates key metrics for a given dataframe."""
-    df['kWh'] = (df['Quantity'] * df['Wattage'] * df['Hours per Day'] * df['Days']) / 1000
-    df['Cost'] = df['kWh'] * COST_PER_KWH
-    total_cost = df['Cost'].sum() + annual_maintenance
-    total_kwh = df['kWh'].sum()
-    total_co2 = (total_kwh * KG_CO2_PER_KWH) / 1000 # to tonnes
-    return total_cost, total_kwh, total_co2, df
+def calculate_metrics(df, annual_maintenance, hours_map, days):
+    df_calc = df.copy()
+    # Map the new hours to each row based on its area
+    df_calc['Hours per Day'] = df_calc['Area'].map(hours_map)
+    df_calc['Days'] = days
+    
+    df_calc['kWh'] = (df_calc['Quantity'] * df_calc['Wattage'] * df_calc['Hours per Day'] * df_calc['Days']) / 1000
+    df_calc['Cost'] = df_calc['kWh'] * COST_PER_KWH
+    total_cost = df_calc['Cost'].sum() + annual_maintenance
+    total_kwh = df_calc['kWh'].sum()
+    total_co2 = (total_kwh * KG_CO2_PER_KWH) / 1000
+    return total_cost, total_kwh, total_co2, df_calc
 
-# Apply calculations
-current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing, ANNUAL_MAINTENANCE_OLD)
-led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed, ANNUAL_MAINTENANCE_LED)
-
-# Savings Calculations
-annual_savings = current_cost - led_cost
-kwh_savings = current_kwh - led_kwh
-co2_savings = current_co2 - led_co2
-
-# Financials
 p = st.session_state.params
+current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, ANNUAL_MAINTENANCE_OLD, p['hours_per_day_map'], p['days_per_year'])
+led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, ANNUAL_MAINTENANCE_LED, p['hours_per_day_map'], p['days_per_year'])
+
+annual_savings = current_cost - led_cost
+co2_savings = current_co2 - led_co2
+payback_period = PROJECT_INSTALL_COST / annual_savings if annual_savings > 0 else 0
+
 loan_amount = PROJECT_INSTALL_COST - p['deposit']
 if p['interest_rate'] == 0:
     monthly_payment = loan_amount / (p['lease_term'] * 12) if p['lease_term'] > 0 else 0
 else:
     monthly_rate = (p['interest_rate'] / 100) / 12
     n_periods = p['lease_term'] * 12
-    monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount) # Use negative loan_amount for positive payment
+    monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount)
 
 annual_funding_cost = monthly_payment * 12
 net_cash_flow = annual_savings - annual_funding_cost
-payback_period = PROJECT_INSTALL_COST / annual_savings if annual_savings > 0 else 0
 
 # =================================================================================================
 # MAIN DASHBOARD LAYOUT
@@ -301,7 +271,6 @@ payback_period = PROJECT_INSTALL_COST / annual_savings if annual_savings > 0 els
 st.title(f"💡 {PROJECT_NAME} Energy & Cost Savings Proposal")
 st.markdown("An interactive proposal for a full-site LED lighting upgrade. All values update live based on your selections in the sidebar.")
 
-# --- 1. Executive Summary (KPI Cards) ---
 st.header("Executive Summary: The Opportunity")
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric("Projected Annual Savings", f"£{annual_savings:,.0f}", f"{((annual_savings/current_cost)*100):.0f}% Reduction" if current_cost > 0 else "N/A")
@@ -310,8 +279,6 @@ kpi3.metric("Carbon Reduction (CO₂e)", f"{co2_savings:.1f} Tonnes/Year", f"{((
 kpi4.metric("Project Payback Period", f"{payback_period:.1f} Years" if payback_period > 0 else "N/A")
 
 st.divider()
-
-# --- 2. Core Comparison & Financials ---
 st.header("Analysis & Financial Breakdown")
 col1, col2 = st.columns(2, gap="large")
 
@@ -322,17 +289,17 @@ with col1:
         "Current System": [current_cost, current_kwh, current_co2],
         "Proposed LED System": [led_cost, led_kwh, led_co2]
     })
-    fig_compare = go.Figure()
-    fig_compare.add_trace(go.Bar(x=df_compare["Metric"], y=df_compare["Current System"], name="Current System", marker_color='#A9A9A9'))
-    fig_compare.add_trace(go.Bar(x=df_compare["Metric"], y=df_compare["Proposed LED System"], name="Proposed LED System", marker_color='#00B050'))
+    fig_compare = go.Figure(data=[
+        go.Bar(name='Current System', x=df_compare['Metric'], y=df_compare['Current System'], marker_color='#A9A9A9'),
+        go.Bar(name='Proposed LED System', x=df_compare['Metric'], y=df_compare['Proposed LED System'], marker_color='#00B050')
+    ])
     fig_compare.update_layout(barmode='group', title_text="Current vs. Proposed System: Annual Impact", yaxis_title="Value", legend_title="System", margin=dict(t=40))
     st.plotly_chart(fig_compare, use_container_width=True)
 
 with col2:
     st.subheader("💰 Annual Cash Flow Breakdown")
     fig_waterfall = go.Figure(go.Waterfall(
-        orientation = "v",
-        measure = ["relative", "relative", "total"],
+        orientation = "v", measure = ["relative", "relative", "total"],
         x = ["Annual Energy Savings", "Annual Funding Cost", "Net Positive Cash Flow"],
         text = [f"£{v:,.0f}" for v in [annual_savings, -annual_funding_cost, net_cash_flow]],
         y = [annual_savings, -annual_funding_cost, net_cash_flow],
@@ -344,15 +311,17 @@ with col2:
     fig_waterfall.update_layout(title="From Savings to Positive Cash Flow", yaxis_title="Amount (£)", margin=dict(t=40))
     st.plotly_chart(fig_waterfall, use_container_width=True)
 
-# --- 3. Savings Breakdown by Area ---
 st.header("Where Do The Savings Come From?")
-# Calculate savings per area
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
 area_savings.columns = ['Area', 'Savings (£)']
-area_savings = area_savings[area_savings['Savings (£)'] > 0] # Only show areas with savings
+area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
 
-fig_treemap = px.treemap(area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
-                         color='Savings (£)', color_continuous_scale='Greens',
-                         title="Annual Savings Contribution by School Area")
-fig_treemap.update_traces(textinfo="label+value+percent-root", texttemplate="%{label}<br>£%{value:,.0f}")
-st.plotly_chart(fig_treemap, use_container_width=True)
+# ### FIX: Check if the dataframe is empty before trying to create the chart ###
+if not area_savings.empty:
+    fig_treemap = px.treemap(area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
+                             color='Savings (£)', color_continuous_scale='Greens',
+                             title="Annual Savings Contribution by School Area")
+    fig_treemap.update_traces(textinfo="label+value+percent-root", texttemplate="%{label}<br>£%{value:,.0f}")
+    st.plotly_chart(fig_treemap, use_container_width=True)
+else:
+    st.info("No savings to display based on the current operational assumptions.")
