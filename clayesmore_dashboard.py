@@ -176,69 +176,59 @@ PROJECT_INSTALL_COST = 155915.00
 ANNUAL_MAINTENANCE_OLD = 0 
 ANNUAL_MAINTENANCE_LED = 0
 
-# Create a dictionary of the default hours per area from your original "proposed" data
-# This is used for the "Reset" button
 DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
 
 DEFAULT_PARAMS = {
     "hours_per_day_map": DEFAULT_HOURS_MAP.copy(),
-    "days_per_year": 220,
+    "days_per_year": 220.0,
     "interest_rate": 5.0,
     "lease_term": 5,
     "deposit": 0,
 }
 
-# =================================================================================================
-# SESSION STATE INITIALIZATION
-# =================================================================================================
 if 'params' not in st.session_state:
     st.session_state.params = DEFAULT_PARAMS.copy()
 
-# =================================================================================================
-# SIDEBAR - INTERACTIVE CONTROLS
-# =================================================================================================
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Use the controls below to model different scenarios.")
 
-# --- General Assumptions ---
-st.session_state.params['days_per_year'] = st.sidebar.slider(
-    "🗓️ Days of Use per Year (All Areas)", 1, 365, st.session_state.params['days_per_year']
+# --- General Assumptions using Number Input for better control ---
+st.session_state.params['days_per_year'] = st.sidebar.number_input(
+    "🗓️ Days of Use per Year (All Areas)",
+    min_value=1.0, max_value=365.0,
+    value=float(st.session_state.params['days_per_year']),
+    step=0.5,
+    format="%.1f"
 )
 
-# --- NEW FEATURE: Detailed Operational Assumptions with individual sliders per area ---
 with st.sidebar.expander("💡 Detailed Operational Assumptions", expanded=True):
     st.markdown("Adjust the average hours of use per day for each area.")
-    
-    # Create a slider for each unique area
     unique_areas = sorted(df_proposed_base['Area'].unique())
     for area in unique_areas:
-        default_hour = DEFAULT_HOURS_MAP.get(area, 8) # Get default, or use 8 if not found
-        # Use the area name as the key for the slider's value in session state
-        st.session_state.params['hours_per_day_map'][area] = st.slider(
-            f"{area}", 1, 24, st.session_state.params['hours_per_day_map'].get(area, default_hour)
+        default_hour = float(DEFAULT_HOURS_MAP.get(area, 8))
+        current_hour = float(st.session_state.params['hours_per_day_map'].get(area, default_hour))
+        st.session_state.params['hours_per_day_map'][area] = st.number_input(
+            f"{area}",
+            min_value=1.0, max_value=24.0,
+            value=current_hour,
+            step=0.5,
+            format="%.1f"
         )
 
-# --- Funding Assumptions ---
 st.sidebar.divider()
 st.sidebar.markdown("### Funding Assumptions")
-st.session_state.params['lease_term'] = st.sidebar.slider("Lease Term (Years)", 1, 10, st.session_state.params['lease_term'])
-st.session_state.params['interest_rate'] = st.sidebar.slider("Interest Rate (%)", 0.0, 15.0, st.session_state.params['interest_rate'], 0.1)
-st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (£)", 0, int(PROJECT_INSTALL_COST), st.session_state.params['deposit'], 1000)
+st.session_state.params['lease_term'] = st.sidebar.number_input("Lease Term (Years)", min_value=1, max_value=20, value=st.session_state.params['lease_term'], step=1)
+st.session_state.params['interest_rate'] = st.sidebar.number_input("Interest Rate (%)", min_value=0.0, max_value=25.0, value=st.session_state.params['interest_rate'], step=0.1, format="%.1f")
+st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (£)", min_value=0, max_value=int(PROJECT_INSTALL_COST), value=st.session_state.params['deposit'], step=1000)
 
-# --- Sidebar Buttons ---
 if st.sidebar.button("Reset to Defaults", use_container_width=True):
     st.session_state.params = DEFAULT_PARAMS.copy()
     st.experimental_rerun()
 
-# =================================================================================================
-# DYNAMIC CALCULATIONS
-# =================================================================================================
 def calculate_metrics(df, annual_maintenance, hours_map, days):
     df_calc = df.copy()
-    # Map the new hours to each row based on its area
-    df_calc['Hours per Day'] = df_calc['Area'].map(hours_map)
+    df_calc['Hours per Day'] = df_calc['Area'].map(hours_map).fillna(8.0)
     df_calc['Days'] = days
-    
     df_calc['kWh'] = (df_calc['Quantity'] * df_calc['Wattage'] * df_calc['Hours per Day'] * df_calc['Days']) / 1000
     df_calc['Cost'] = df_calc['kWh'] * COST_PER_KWH
     total_cost = df_calc['Cost'].sum() + annual_maintenance
@@ -260,14 +250,11 @@ if p['interest_rate'] == 0:
 else:
     monthly_rate = (p['interest_rate'] / 100) / 12
     n_periods = p['lease_term'] * 12
-    monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount)
+    monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount) if n_periods > 0 else 0
 
 annual_funding_cost = monthly_payment * 12
 net_cash_flow = annual_savings - annual_funding_cost
 
-# =================================================================================================
-# MAIN DASHBOARD LAYOUT
-# =================================================================================================
 st.title(f"💡 {PROJECT_NAME} Energy & Cost Savings Proposal")
 st.markdown("An interactive proposal for a full-site LED lighting upgrade. All values update live based on your selections in the sidebar.")
 
@@ -289,9 +276,10 @@ with col1:
         "Current System": [current_cost, current_kwh, current_co2],
         "Proposed LED System": [led_cost, led_kwh, led_co2]
     })
+    # --- FIX: Added width parameter to make bars thicker ---
     fig_compare = go.Figure(data=[
-        go.Bar(name='Current System', x=df_compare['Metric'], y=df_compare['Current System'], marker_color='#A9A9A9'),
-        go.Bar(name='Proposed LED System', x=df_compare['Metric'], y=df_compare['Proposed LED System'], marker_color='#00B050')
+        go.Bar(name='Current System', x=df_compare['Metric'], y=df_compare['Current System'], marker_color='#A9A9A9', width=0.4),
+        go.Bar(name='Proposed LED System', x=df_compare['Metric'], y=df_compare['Proposed LED System'], marker_color='#00B050', width=0.4)
     ])
     fig_compare.update_layout(barmode='group', title_text="Current vs. Proposed System: Annual Impact", yaxis_title="Value", legend_title="System", margin=dict(t=40))
     st.plotly_chart(fig_compare, use_container_width=True)
@@ -314,14 +302,15 @@ with col2:
 st.header("Where Do The Savings Come From?")
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
 area_savings.columns = ['Area', 'Savings (£)']
-area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
 
-# ### FIX: Check if the dataframe is empty before trying to create the chart ###
-if not area_savings.empty:
-    fig_treemap = px.treemap(area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
+# --- ROBUST FIX: Filter for POSITIVE savings before plotting ---
+positive_area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
+
+if not positive_area_savings.empty:
+    fig_treemap = px.treemap(positive_area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
                              color='Savings (£)', color_continuous_scale='Greens',
                              title="Annual Savings Contribution by School Area")
     fig_treemap.update_traces(textinfo="label+value+percent-root", texttemplate="%{label}<br>£%{value:,.0f}")
     st.plotly_chart(fig_treemap, use_container_width=True)
 else:
-    st.info("No savings to display based on the current operational assumptions.")
+    st.info("Based on the current settings, there are no net savings in any area to display.")
