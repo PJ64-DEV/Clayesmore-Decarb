@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy_financial as npf
 from io import StringIO
+import json
+import urllib.parse
 
 # =================================================================================================
 # PAGE CONFIGURATION
@@ -16,7 +18,6 @@ st.set_page_config(
 
 # =================================================================================================
 # --- DATA LOADING AND PROCESSING ---
-# This section parses the raw text data you provided.
 # =================================================================================================
 
 RAW_DATA = """
@@ -169,15 +170,12 @@ def load_and_process_data():
 
 df_existing_base, df_proposed_base = load_and_process_data()
 
+# --- App Constants ---
 PROJECT_NAME = "Clayesmore School"
 COST_PER_KWH = 0.25
 KG_CO2_PER_KWH = 0.233
 PROJECT_INSTALL_COST = 155915.00
-ANNUAL_MAINTENANCE_OLD = 0 
-ANNUAL_MAINTENANCE_LED = 0
-
 DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
-
 DEFAULT_PARAMS = {
     "hours_per_day_map": DEFAULT_HOURS_MAP.copy(),
     "days_per_year": 220.0,
@@ -186,63 +184,92 @@ DEFAULT_PARAMS = {
     "deposit": 0,
 }
 
-if 'params' not in st.session_state:
-    st.session_state.params = DEFAULT_PARAMS.copy()
+# --- Functions ---
+def initialize_session_state():
+    """Load settings from URL query params if they exist, otherwise use defaults."""
+    query_params = st.experimental_get_query_params()
+    if "settings" in query_params:
+        try:
+            # Decode the URL-safe string back into a dictionary
+            decoded_settings = json.loads(urllib.parse.unquote(query_params["settings"][0]))
+            st.session_state.params = decoded_settings
+            # Ensure all keys from default are present
+            for key, value in DEFAULT_PARAMS.items():
+                if key not in st.session_state.params:
+                    st.session_state.params[key] = value
+        except (json.JSONDecodeError, TypeError):
+            # If URL params are malformed, fall back to defaults
+            st.session_state.params = DEFAULT_PARAMS.copy()
+    else:
+        # If no params, use defaults
+        st.session_state.params = DEFAULT_PARAMS.copy()
 
-st.sidebar.title("🎛️ Scenario Planner")
-st.sidebar.markdown("Use the controls below to model different scenarios.")
-
-st.session_state.params['days_per_year'] = st.sidebar.number_input(
-    "🗓️ Days of Use per Year (All Areas)",
-    min_value=1.0, max_value=365.0,
-    value=float(st.session_state.params['days_per_year']),
-    step=0.5,
-    format="%.1f"
-)
-
-with st.sidebar.expander("💡 Detailed Operational Assumptions", expanded=True):
-    st.markdown("Adjust the average hours of use per day for each area.")
-    unique_areas = sorted(df_proposed_base['Area'].unique())
-    for area in unique_areas:
-        default_hour = float(DEFAULT_HOURS_MAP.get(area, 8))
-        current_hour = float(st.session_state.params['hours_per_day_map'].get(area, default_hour))
-        st.session_state.params['hours_per_day_map'][area] = st.number_input(
-            f"{area}",
-            min_value=0.5, max_value=24.0,
-            value=current_hour,
-            step=0.5,
-            format="%.1f",
-            key=f"hours_{area}" # Unique key for each number_input
-        )
-
-st.sidebar.divider()
-st.sidebar.markdown("### Funding Assumptions")
-st.session_state.params['lease_term'] = st.sidebar.number_input("Lease Term (Years)", min_value=1, max_value=20, value=st.session_state.params['lease_term'], step=1)
-st.session_state.params['interest_rate'] = st.sidebar.number_input("Interest Rate (%)", min_value=0.0, max_value=25.0, value=st.session_state.params['interest_rate'], step=0.1, format="%.1f")
-st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (£)", min_value=0, max_value=int(PROJECT_INSTALL_COST), value=st.session_state.params['deposit'], step=1000)
-
-if st.sidebar.button("Reset to Defaults", use_container_width=True):
-    st.session_state.params = DEFAULT_PARAMS.copy()
-    st.experimental_rerun()
-
-def calculate_metrics(df, annual_maintenance, hours_map, days):
+def calculate_metrics(df, hours_map, days):
     df_calc = df.copy()
     df_calc['Hours per Day'] = df_calc['Area'].map(hours_map).fillna(8.0)
     df_calc['Days'] = days
     df_calc['kWh'] = (df_calc['Quantity'] * df_calc['Wattage'] * df_calc['Hours per Day'] * df_calc['Days']) / 1000
     df_calc['Cost'] = df_calc['kWh'] * COST_PER_KWH
-    total_cost = df_calc['Cost'].sum() + annual_maintenance
+    total_cost = df_calc['Cost'].sum()
     total_kwh = df_calc['kWh'].sum()
     total_co2 = (total_kwh * KG_CO2_PER_KWH) / 1000
     return total_cost, total_kwh, total_co2, df_calc
 
-p = st.session_state.params
-current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, ANNUAL_MAINTENANCE_OLD, p['hours_per_day_map'], p['days_per_year'])
-led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, ANNUAL_MAINTENANCE_LED, p['hours_per_day_map'], p['days_per_year'])
+# --- Main App Flow ---
 
-annual_savings = current_cost - led_cost
-co2_savings = current_co2 - led_co2
-payback_period = PROJECT_INSTALL_COST / annual_savings if annual_savings > 0 else 0
+# Initialize state ONCE at the start of the script
+if 'params' not in st.session_state:
+    initialize_session_state()
+
+# === SIDEBAR ===
+st.sidebar.title("🎛️ Scenario Planner")
+st.sidebar.markdown("Adjust the school's operational and financial assumptions to see the live impact.")
+
+st.session_state.params['days_per_year'] = st.sidebar.number_input(
+    "🗓️ Days of Use per Year (All Areas)",
+    min_value=1.0, max_value=365.0, value=float(st.session_state.params['days_per_year']),
+    step=0.5, format="%.1f", key="days_per_year"
+)
+
+with st.sidebar.expander("💡 Detailed Usage (Hours/Day)", expanded=False):
+    unique_areas = sorted(df_proposed_base['Area'].unique())
+    for area in unique_areas:
+        default_hour = float(DEFAULT_HOURS_MAP.get(area, 8))
+        current_hour = float(st.session_state.params['hours_per_day_map'].get(area, default_hour))
+        st.session_state.params['hours_per_day_map'][area] = st.number_input(
+            f"{area}", min_value=0.5, max_value=24.0, value=current_hour,
+            step=0.5, format="%.1f", key=f"hours_{area}"
+        )
+
+st.sidebar.divider()
+st.sidebar.markdown("### Funding Assumptions")
+st.session_state.params['lease_term'] = st.sidebar.number_input("Lease Term (Years)", min_value=1, max_value=20, value=int(st.session_state.params['lease_term']), step=1, key="lease_term")
+st.session_state.params['interest_rate'] = st.sidebar.number_input("Interest Rate (%)", min_value=0.0, max_value=25.0, value=float(st.session_state.params['interest_rate']), step=0.1, format="%.1f", key="interest_rate")
+st.session_state.params['deposit'] = st.sidebar.number_input(f"Upfront Deposit (£)", min_value=0, max_value=int(PROJECT_INSTALL_COST), value=int(st.session_state.params['deposit']), step=1000, key="deposit")
+
+st.sidebar.divider()
+if st.sidebar.button("Reset to Conservative Defaults", use_container_width=True):
+    st.session_state.params = DEFAULT_PARAMS.copy()
+    # Clear URL params on reset
+    st.experimental_set_query_params()
+    st.experimental_rerun()
+
+# === NEW: Generate Sharable Link Feature ===
+if st.sidebar.button("🔗 Generate Sharable Link", use_container_width=True, type="primary"):
+    # Encode the entire params dictionary as a URL-safe string
+    settings_str = urllib.parse.quote(json.dumps(st.session_state.params))
+    st.experimental_set_query_params(settings=settings_str)
+    st.sidebar.success("Link Updated in Browser! Bookmark this page to save your settings.")
+    st.sidebar.info("You can now copy the URL from your browser's address bar to share or save this specific scenario.")
+
+# === CALCULATIONS ===
+p = st.session_state.params
+current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, p['hours_per_day_map'], p['days_per_year'])
+led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, p['hours_per_day_map'], p['days_per_year'])
+
+estimated_savings_cost = current_cost - led_cost
+estimated_savings_kwh = current_kwh - led_kwh
+estimated_savings_co2 = current_co2 - led_co2
 
 loan_amount = PROJECT_INSTALL_COST - p['deposit']
 if p['interest_rate'] == 0:
@@ -251,64 +278,92 @@ else:
     monthly_rate = (p['interest_rate'] / 100) / 12
     n_periods = p['lease_term'] * 12
     monthly_payment = npf.pmt(monthly_rate, n_periods, -loan_amount) if n_periods > 0 else 0
-
 annual_funding_cost = monthly_payment * 12
-net_cash_flow = annual_savings - annual_funding_cost
+net_cash_flow = estimated_savings_cost - annual_funding_cost
 
+# === MAIN DASHBOARD LAYOUT ===
 st.title(f"💡 {PROJECT_NAME} Energy & Cost Savings Proposal")
-st.markdown("An interactive proposal for a full-site LED lighting upgrade. All values update live based on your selections in the sidebar.")
+st.markdown("An interactive proposal for a full-site LED lighting upgrade. Use the sidebar to adjust assumptions and see the live impact.")
 
-st.header("Executive Summary: The Opportunity")
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-kpi1.metric("Projected Annual Savings", f"£{annual_savings:,.0f}", f"{((annual_savings/current_cost)*100):.0f}% Reduction" if current_cost > 0 else "N/A")
-kpi2.metric("Positive Annual Cashflow", f"£{net_cash_flow:,.0f}", "After funding costs")
-kpi3.metric("Carbon Reduction (CO₂e)", f"{co2_savings:.1f} Tonnes/Year", f"{((co2_savings/current_co2)*100):.0f}% Reduction" if current_co2 > 0 else "N/A")
-kpi4.metric("Project Payback Period", f"{payback_period:.1f} Years" if payback_period > 0 else "N/A")
+# === NEW: Four-Tier Key Metrics Layout ===
+st.header("Executive Summary")
+st.markdown("---")
+
+# Tier 1: Current
+st.subheader("Current Annual Consumption & Spend")
+col1, col2, col3 = st.columns(3)
+col1.metric("Energy Consumption", f"{current_kwh:,.0f} kWh")
+col2.metric("Carbon Emissions", f"{current_co2:,.1f} Tonnes CO₂e")
+col3.metric("Financial Expenditure", f"£{current_cost:,.0f}")
+
+# Tier 2: Estimated Post-Upgrade
+st.subheader("Estimated Annual Consumption & Spend (Post-Upgrade)")
+col1, col2, col3 = st.columns(3)
+col1.metric("Est. Energy Consumption", f"{led_kwh:,.0f} kWh")
+col2.metric("Est. Carbon Emissions", f"{led_co2:,.1f} Tonnes CO₂e")
+col3.metric("Est. Financial Expenditure", f"£{led_cost:,.0f}")
+
+# Tier 3: Savings
+st.subheader("Total Estimated Annual Savings")
+col1, col2, col3 = st.columns(3)
+col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh", f"{-estimated_savings_kwh:,.0f}", delta_color="inverse")
+col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e", f"{-estimated_savings_co2:,.1f}", delta_color="inverse")
+col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}", f"£{-estimated_savings_cost:,.0f}", delta_color="inverse")
+
+st.markdown("---")
+
+# Tier 4: The Financial Case
+st.subheader("The Financial Case")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Installation Cost", f"£{PROJECT_INSTALL_COST:,.0f}")
+col2.metric("Annual Funding Cost", f"£{annual_funding_cost:,.0f}")
+col3.metric("Annual Cost Savings", f"£{estimated_savings_cost:,.0f}")
+
+# Logic for the colored Net Cash Flow metric
+if net_cash_flow >= 0:
+    delta_color = "inverse" # Green
+    delta_text = f"+ £{net_cash_flow:,.0f}"
+else:
+    delta_color = "normal" # Red
+    delta_text = f"- £{abs(net_cash_flow):,.0f}"
+col4.metric("Net Annual Cash Flow", f"£{net_cash_flow:,.0f}", delta=delta_text, delta_color=delta_color)
 
 st.divider()
-st.header("Analysis & Financial Breakdown")
+
+# === VISUAL ANALYSIS ===
+st.header("Visual Analysis")
 col1, col2 = st.columns(2, gap="large")
 
 with col1:
-    st.subheader("⚡ Annual Consumption & Costs")
-    df_compare = pd.DataFrame({
-        "Metric": ["Running Costs (£)", "Energy Use (kWh)", "CO₂ Emissions (Tonnes)"],
-        "Current System": [current_cost, current_kwh, current_co2],
-        "Proposed LED System": [led_cost, led_kwh, led_co2]
-    })
-    fig_compare = go.Figure(data=[
-        go.Bar(name='Current System', x=df_compare['Metric'], y=df_compare['Current System'], marker_color='#A9A9A9', width=0.4),
-        go.Bar(name='Proposed LED System', x=df_compare['Metric'], y=df_compare['Proposed LED System'], marker_color='#00B050', width=0.4)
-    ])
-    fig_compare.update_layout(barmode='group', title_text="Current vs. Proposed System: Annual Impact", yaxis_title="Value", legend_title="System", margin=dict(t=40))
-    st.plotly_chart(fig_compare, use_container_width=True)
+    st.subheader("Savings Contribution by Area")
+    area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
+    area_savings.columns = ['Area', 'Savings (£)']
+    positive_area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
+    
+    # === BULLETPROOF FIX: Use a try/except block ===
+    try:
+        if not positive_area_savings.empty:
+            fig_treemap = px.treemap(positive_area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
+                                     color='Savings (£)', color_continuous_scale='Greens',
+                                     title="Breakdown of Estimated Annual Savings")
+            fig_treemap.update_traces(textinfo="label+value+percent-root", texttemplate="%{label}<br>£%{value:,.0f}")
+            st.plotly_chart(fig_treemap, use_container_width=True)
+        else:
+            st.info("Based on the current settings, there are no net savings in any area to display.")
+    except Exception as e:
+        st.error(f"Could not display the savings breakdown chart. Please adjust the settings. Error: {e}")
 
 with col2:
-    st.subheader("💰 Annual Cash Flow Breakdown")
-    fig_waterfall = go.Figure(go.Waterfall(
-        orientation = "v", measure = ["relative", "relative", "total"],
-        x = ["Annual Energy Savings", "Annual Funding Cost", "Net Positive Cash Flow"],
-        text = [f"£{v:,.0f}" for v in [annual_savings, -annual_funding_cost, net_cash_flow]],
-        y = [annual_savings, -annual_funding_cost, net_cash_flow],
-        connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        increasing = {"marker":{"color":"#00B050"}},
-        decreasing = {"marker":{"color":"#FF5733"}},
-        totals = {"marker":{"color":"#4682B4"}}
-    ))
-    fig_waterfall.update_layout(title="From Savings to Positive Cash Flow", yaxis_title="Amount (£)", margin=dict(t=40))
-    st.plotly_chart(fig_waterfall, use_container_width=True)
-
-st.header("Where Do The Savings Come From?")
-area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
-area_savings.columns = ['Area', 'Savings (£)']
-
-positive_area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
-
-if not positive_area_savings.empty:
-    fig_treemap = px.treemap(positive_area_savings, path=[px.Constant("All Areas"), 'Area'], values='Savings (£)',
-                             color='Savings (£)', color_continuous_scale='Greens',
-                             title="Annual Savings Contribution by School Area")
-    fig_treemap.update_traces(textinfo="label+value+percent-root", texttemplate="%{label}<br>£%{value:,.0f}")
-    st.plotly_chart(fig_treemap, use_container_width=True)
-else:
-    st.info("Based on the current settings, there are no net savings in any area to display.")
+    st.subheader("Payback Over Time")
+    # This chart is a bit more complex, let's keep it simple for now
+    payback_period = PROJECT_INSTALL_COST / estimated_savings_cost if estimated_savings_cost > 0 else 0
+    if payback_period > 0 and payback_period <= 20:
+        years = list(range(1, int(payback_period) + 2))
+        cumulative_savings = [year * estimated_savings_cost for year in years]
+        fig_payback = go.Figure()
+        fig_payback.add_trace(go.Scatter(x=years, y=cumulative_savings, mode='lines+markers', name='Cumulative Savings'))
+        fig_payback.add_hline(y=PROJECT_INSTALL_COST, line_dash="dash", line_color="red", name="Installation Cost", annotation_text="Installation Cost")
+        fig_payback.update_layout(title=f"Project Payback in {payback_period:.1f} Years", xaxis_title="Years", yaxis_title="Cumulative Savings (£)")
+        st.plotly_chart(fig_payback, use_container_width=True)
+    else:
+        st.info("Payback period is either negative or too long to display based on current savings.")
