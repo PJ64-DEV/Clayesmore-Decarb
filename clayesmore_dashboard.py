@@ -190,22 +190,23 @@ UNIQUE_AREAS = sorted(df_proposed_base['Area'].unique())
 # Set default values for the session
 def set_defaults():
     st.session_state.days_per_year = 220.0
-    st.session_state.lease_term_months = 60 # Default to 60 months
+    st.session_state.lease_term_months = 60
     st.session_state.interest_rate = 5.0
     st.session_state.deposit = 0
     for area, hours in DEFAULT_HOURS_MAP.items():
         st.session_state[f"hours_{area}"] = float(hours)
 
-# Initialize state if it's the first run
+# This is the very first thing in the script's execution
+# It checks if the reset button was clicked in the *previous* run
+if st.sidebar.button("Reset Defaults", use_container_width=True):
+    set_defaults()
+    st.rerun() # Use the new, correct rerun function
+
+# Initialize state if it's the first ever run
 if 'days_per_year' not in st.session_state:
     set_defaults()
 
-# --- SIDEBAR ---
-# This button is placed first. When clicked, it resets state and forces a rerun.
-if st.sidebar.button("Reset Defaults", use_container_width=True):
-    set_defaults()
-    st.experimental_rerun()
-
+# --- SIDEBAR WIDGETS ---
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Adjust assumptions to see the live impact.")
 
@@ -256,12 +257,26 @@ st.markdown("An interactive proposal for a full-site LED lighting upgrade. Use t
 st.header("Executive Summary")
 st.markdown("---")
 
-# Tier 1 & 2
-st.subheader("Current vs. Estimated Annual Performance")
+# Tier 1: Current
+st.subheader("Current Annual Consumption & Spend")
 col1, col2, col3 = st.columns(3)
-col1.metric("Energy Consumption (kWh)", f"{led_kwh:,.0f}", f"{-estimated_savings_kwh:,.0f} kWh")
-col2.metric("Carbon Emissions (Tonnes CO₂e)", f"{led_co2:,.1f}", f"{-estimated_savings_co2:,.1f} T")
-col3.metric("Financial Expenditure (£)", f"£{led_cost:,.0f}", f"£{-estimated_savings_cost:,.0f}")
+col1.metric("Energy Consumption", f"{current_kwh:,.0f} kWh")
+col2.metric("Carbon Emissions", f"{current_co2:,.1f} Tonnes CO₂e")
+col3.metric("Financial Expenditure", f"£{current_cost:,.0f}")
+
+# Tier 2: Estimated Post-Upgrade
+st.subheader("Estimated Annual Consumption & Spend (Post-Upgrade)")
+col1, col2, col3 = st.columns(3)
+col1.metric("Est. Energy Consumption", f"{led_kwh:,.0f} kWh")
+col2.metric("Est. Carbon Emissions", f"{led_co2:,.1f} Tonnes CO₂e")
+col3.metric("Est. Financial Expenditure", f"£{led_cost:,.0f}")
+
+# Tier 3: Savings
+st.subheader("Total Estimated Annual Savings")
+col1, col2, col3 = st.columns(3)
+col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh", f"{-estimated_savings_kwh:,.0f}", delta_color="inverse")
+col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e", f"{-estimated_savings_co2:,.1f}", delta_color="inverse")
+col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}", f"£{-estimated_savings_cost:,.0f}", delta_color="inverse")
 
 st.markdown("---")
 # Tier 4: The Financial Case
@@ -285,7 +300,6 @@ positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
 
 if not positive_area_savings.empty:
     st.subheader("Savings Contribution by Area")
-    # Sort for the bar chart so largest is at the top
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
     
     fig_bar = px.bar(
@@ -295,11 +309,14 @@ if not positive_area_savings.empty:
         orientation='h',
         title="Breakdown of Estimated Annual Savings",
         labels={'Savings (£)': 'Annual Savings (£)', 'Area': ''},
-        text='Savings (£)'
+        text='Savings (£)',
+        color='Savings (£)',
+        color_continuous_scale=px.colors.sequential.Greens
     )
-    fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='inside')
+    fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='auto')
     fig_bar.update_layout(
-        uniformtext_minsize=8, uniformtext_mode='hide', yaxis={'categoryorder':'total ascending'}
+        uniformtext_minsize=8, uniformtext_mode='hide', yaxis={'categoryorder':'total ascending'},
+        coloraxis_showscale=False # Hides the unnecessary color scale bar
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 else:
