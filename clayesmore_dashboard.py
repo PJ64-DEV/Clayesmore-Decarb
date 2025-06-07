@@ -192,7 +192,6 @@ if 'params' not in st.session_state:
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Use the controls below to model different scenarios.")
 
-# --- General Assumptions using Number Input for better control ---
 st.session_state.params['days_per_year'] = st.sidebar.number_input(
     "🗓️ Days of Use per Year (All Areas)",
     min_value=1.0, max_value=365.0,
@@ -209,10 +208,11 @@ with st.sidebar.expander("💡 Detailed Operational Assumptions", expanded=True)
         current_hour = float(st.session_state.params['hours_per_day_map'].get(area, default_hour))
         st.session_state.params['hours_per_day_map'][area] = st.number_input(
             f"{area}",
-            min_value=1.0, max_value=24.0,
+            min_value=0.5, max_value=24.0,
             value=current_hour,
             step=0.5,
-            format="%.1f"
+            format="%.1f",
+            key=f"hours_{area}" # Unique key for each number_input
         )
 
 st.sidebar.divider()
@@ -276,7 +276,6 @@ with col1:
         "Current System": [current_cost, current_kwh, current_co2],
         "Proposed LED System": [led_cost, led_kwh, led_co2]
     })
-    # --- FIX: Added width parameter to make bars thicker ---
     fig_compare = go.Figure(data=[
         go.Bar(name='Current System', x=df_compare['Metric'], y=df_compare['Current System'], marker_color='#A9A9A9', width=0.4),
         go.Bar(name='Proposed LED System', x=df_compare['Metric'], y=df_compare['Proposed LED System'], marker_color='#00B050', width=0.4)
@@ -303,7 +302,6 @@ st.header("Where Do The Savings Come From?")
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
 area_savings.columns = ['Area', 'Savings (£)']
 
-# --- ROBUST FIX: Filter for POSITIVE savings before plotting ---
 positive_area_savings = area_savings[area_savings['Savings (£)'] > 0].sort_values(by='Savings (£)', ascending=False)
 
 if not positive_area_savings.empty:
