@@ -167,12 +167,12 @@ def load_and_process_data():
     return df_existing, df_proposed
 
 # --- Functions ---
-def calculate_metrics(df, hours_map, days):
+def calculate_metrics(df, hours_map, days, cost_per_kwh):
     df_calc = df.copy()
     df_calc['Hours per Day'] = df_calc['Area'].map(hours_map).fillna(8.0)
     df_calc['Days'] = days
     df_calc['kWh'] = (df_calc['Quantity'] * df_calc['Wattage'] * df_calc['Hours per Day'] * df_calc['Days']) / 1000
-    df_calc['Cost'] = df_calc['kWh'] * COST_PER_KWH
+    df_calc['Cost'] = df_calc['kWh'] * cost_per_kwh
     total_cost = df_calc['Cost'].sum()
     total_kwh = df_calc['kWh'].sum()
     total_co2 = (total_kwh * KG_CO2_PER_KWH) / 1000
@@ -181,14 +181,13 @@ def calculate_metrics(df, hours_map, days):
 # --- App Constants & Initialization ---
 df_existing_base, df_proposed_base = load_and_process_data()
 PROJECT_NAME = "Clayesmore School"
-COST_PER_KWH = 0.25
 KG_CO2_PER_KWH = 0.233
 PROJECT_INSTALL_COST = 155915.00
 DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
 UNIQUE_AREAS = sorted(df_proposed_base['Area'].unique())
 
-# Set default values for the session
 def set_defaults():
+    st.session_state.cost_per_kwh = 0.250
     st.session_state.days_per_year = 220.0
     st.session_state.lease_term_months = 60
     st.session_state.interest_rate = 5.0
@@ -200,16 +199,21 @@ def set_defaults():
 # It checks if the reset button was clicked in the *previous* run
 if st.sidebar.button("Reset Defaults", use_container_width=True):
     set_defaults()
-    st.rerun() # Use the new, correct rerun function
+    st.rerun() # Use the correct, modern rerun function
 
 # Initialize state if it's the first ever run
-if 'days_per_year' not in st.session_state:
+if 'cost_per_kwh' not in st.session_state:
     set_defaults()
 
 # --- SIDEBAR WIDGETS ---
 st.sidebar.title("🎛️ Scenario Planner")
 st.sidebar.markdown("Adjust assumptions to see the live impact.")
 
+st.sidebar.number_input(
+    "⚡ Cost per kWh (£)",
+    min_value=0.000, max_value=1.000,
+    step=0.005, format="%.3f", key="cost_per_kwh"
+)
 st.sidebar.number_input(
     "🗓️ Days of Use per Year",
     min_value=1.0, max_value=365.0,
@@ -231,13 +235,14 @@ st.sidebar.number_input(f"Upfront Deposit (£)", min_value=0, max_value=int(PROJ
 
 # === CALCULATIONS ===
 hours_map_from_state = {area: st.session_state[f"hours_{area}"] for area in UNIQUE_AREAS}
+cost_per_kwh = st.session_state.cost_per_kwh
 days_per_year = st.session_state.days_per_year
 lease_term_months = st.session_state.lease_term_months
 interest_rate = st.session_state.interest_rate
 deposit = st.session_state.deposit
 
-current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, hours_map_from_state, days_per_year)
-led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, hours_map_from_state, days_per_year)
+current_cost, current_kwh, current_co2, df_existing_calc = calculate_metrics(df_existing_base, hours_map_from_state, days_per_year, cost_per_kwh)
+led_cost, led_kwh, led_co2, df_proposed_calc = calculate_metrics(df_proposed_base, hours_map_from_state, days_per_year, cost_per_kwh)
 estimated_savings_cost = current_cost - led_cost
 estimated_savings_kwh = current_kwh - led_kwh
 estimated_savings_co2 = current_co2 - led_co2
@@ -250,6 +255,7 @@ else:
     monthly_payment = npf.pmt(monthly_rate, lease_term_months, -loan_amount) if lease_term_months > 0 else 0
 annual_funding_cost = monthly_payment * 12
 net_cash_flow = estimated_savings_cost - annual_funding_cost
+payback_period_years = PROJECT_INSTALL_COST / estimated_savings_cost if estimated_savings_cost > 0 else float('inf')
 
 # === MAIN DASHBOARD LAYOUT ===
 st.title(f"💡 {PROJECT_NAME} Energy & Cost Savings Proposal")
@@ -273,23 +279,30 @@ col3.metric("Est. Financial Expenditure", f"£{led_cost:,.0f}")
 
 # Tier 3: Savings
 st.subheader("Total Estimated Annual Savings")
-col1, col2, col3 = st.columns(3)
-col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh", f"{-estimated_savings_kwh:,.0f}", delta_color="inverse")
-col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e", f"{-estimated_savings_co2:,.1f}", delta_color="inverse")
-col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}", f"£{-estimated_savings_cost:,.0f}", delta_color="inverse")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh")
+col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e")
+col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}")
+# Prominent % reduction in the 4th column
+percent_reduction = (estimated_savings_kwh / current_kwh * 100) if current_kwh > 0 else 0
+col4.metric("Overall Reduction", f"{percent_reduction:.1f}%")
 
 st.markdown("---")
 # Tier 4: The Financial Case
 st.subheader("The Financial Case")
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Installation Cost", f"£{PROJECT_INSTALL_COST:,.0f}")
 col2.metric("Annual Funding Cost", f"£{annual_funding_cost:,.0f}")
-col3.metric("Annual Cost Savings", f"£{estimated_savings_cost:,.0f}")
-
+col3.metric("Est. Annual Cost Savings", f"£{estimated_savings_cost:,.0f}")
 if net_cash_flow >= 0:
-    col4.metric("Net Annual Cash Flow", f"+ £{net_cash_flow:,.0f}", "Positive", delta_color="off")
+    col4.metric("Net Annual Cash Flow", f"+ £{net_cash_flow:,.0f}")
 else:
-    col4.metric("Net Annual Cash Flow", f"- £{abs(net_cash_flow):,.0f}", "Negative", delta_color="off")
+    col4.metric("Net Annual Cash Flow", f"- £{abs(net_cash_flow):,.0f}")
+# Payback Period / ROI
+if payback_period_years <= 20: # Only show if payback is reasonable
+    col5.metric("Payback Period", f"{payback_period_years:.1f} Years")
+else:
+    col5.metric("Payback Period", "N/A")
 st.divider()
 
 # === VISUAL ANALYSIS ===
@@ -302,21 +315,28 @@ if not positive_area_savings.empty:
     st.subheader("Savings Contribution by Area")
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
     
+    # Give the chart a fixed height to provide more space
+    bar_chart_height = 400 + (len(positive_area_savings) * 20) # Dynamic height based on number of areas
+
     fig_bar = px.bar(
         positive_area_savings,
         x='Savings (£)',
         y='Area',
         orientation='h',
-        title="Breakdown of Estimated Annual Savings",
-        labels={'Savings (£)': 'Annual Savings (£)', 'Area': ''},
         text='Savings (£)',
         color='Savings (£)',
         color_continuous_scale=px.colors.sequential.Greens
     )
     fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='auto')
     fig_bar.update_layout(
-        uniformtext_minsize=8, uniformtext_mode='hide', yaxis={'categoryorder':'total ascending'},
-        coloraxis_showscale=False # Hides the unnecessary color scale bar
+        height=bar_chart_height,
+        title_text="Breakdown of Estimated Annual Savings",
+        xaxis_title="Annual Savings (£)",
+        yaxis_title=None,
+        uniformtext_minsize=8,
+        uniformtext_mode='hide',
+        yaxis={'categoryorder':'total ascending'},
+        coloraxis_showscale=False
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 else:
