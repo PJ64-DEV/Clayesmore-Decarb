@@ -334,7 +334,7 @@ def create_concentric_gauge(new_val, current_val, explainer_text, title_text, pr
         gauge={
             'shape': 'angular',
             'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': 'rgba(214, 39, 40, 0.8)', 'thickness': 0.8},
+            'bar': {'color': 'rgba(214, 39, 40, 0.8)', 'thickness': 0.8}, # Slightly thinner
         }
     ))
     
@@ -346,7 +346,7 @@ def create_concentric_gauge(new_val, current_val, explainer_text, title_text, pr
         gauge={
             'shape': 'angular',
             'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': '#2ca02c', 'thickness': 0.6},
+            'bar': {'color': '#2ca02c', 'thickness': 0.6}, # Thinnest
         }
     ))
 
