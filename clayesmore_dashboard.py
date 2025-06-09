@@ -95,7 +95,7 @@ WC,16W,7,18,0.13,8,220,222,£55.44,0.05
 WC,2X18W,32,40,1.28,8,220,2253,£563.20,0.52
 WC,58W,1,64,0.06,8,220,113,£28.16,0.03
 PROPOSED FITTINGS
-Area,Lamp replacement,Quantity,Wattage,kW/Hour,Hours per Day,Days,Total kWh Per annum,Proposed Running Cost,CO2 Tns
+Area,Lamp replacement,Quantity,Wattage,kW/Hour,Hours per Day,Days,Total kWh Per Annum,Proposed Running Cost,CO2 Tns
 CIRCULATION,70W PENDANT,7,70,0.49,4,220,431,£107.80,0.10
 CIRCULATION,16W PANEL,67,16,1.07,4,220,943,£235.84,0.22
 CIRCULATION,10W BULKHEAD,46,10,0.46,4,220,405,£101.20,0.09
@@ -308,19 +308,20 @@ st.header("Visual Analysis")
 st.subheader("Visual Comparison: Current vs. Estimated")
 g1, g2, g3 = st.columns(3)
 
-def create_concentric_gauge(current_val, new_val, explainer_text, title_text, prefix="", suffix="", dtick_val=None):
-    max_range = current_val * 1.1 if current_val > 0 else 1 # Avoid division by zero
+def create_concentric_gauge(new_val, current_val, explainer_text, title_text, prefix="", suffix="", dtick_val=None, max_range=None):
+    if max_range is None:
+        max_range = current_val * 1.1 if current_val > 0 else 1
     
     fig = go.Figure()
 
-    # Layer 1: White background
+    # Layer 1: White background with visible ticks
     fig.add_trace(go.Indicator(
         mode='gauge',
-        value=max_range, # Fill the whole gauge
+        value=current_val, # This layer shows the full range
         domain={'x': [0, 1], 'y': [0, 1]},
         gauge={
             'shape': 'angular',
-            'axis': {'range': [0, max_range], 'tickwidth': 1, 'tickcolor': "darkgray", 'dtick': dtick_val},
+            'axis': {'range': [0, max_range], 'tickwidth': 2, 'tickcolor': "darkgray", 'dtick': dtick_val},
             'bar': {'color': 'white', 'thickness': 1.0},
         }
     ))
@@ -333,7 +334,7 @@ def create_concentric_gauge(current_val, new_val, explainer_text, title_text, pr
         gauge={
             'shape': 'angular',
             'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': 'rgba(232, 17, 35, 0.8)', 'thickness': 0.8}, # Slightly thinner
+            'bar': {'color': 'rgba(214, 39, 40, 0.8)', 'thickness': 0.8},
         }
     ))
     
@@ -345,7 +346,7 @@ def create_concentric_gauge(current_val, new_val, explainer_text, title_text, pr
         gauge={
             'shape': 'angular',
             'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': '#2ca02c', 'thickness': 0.6}, # Thinnest
+            'bar': {'color': '#2ca02c', 'thickness': 0.6},
         }
     ))
 
@@ -353,27 +354,27 @@ def create_concentric_gauge(current_val, new_val, explainer_text, title_text, pr
     savings = current_val - new_val
     fig.add_annotation(
         text=explainer_text,
-        x=0.5, y=0.4, font_size=20, showarrow=False,
+        x=0.5, y=0.40, font_size=20, showarrow=False,
         font={'color': 'gray'}
     )
     fig.add_annotation(
         text=f"<b>{prefix}{savings:,.2f}{suffix}</b>",
-        x=0.5, y=0.2, font_size=36, showarrow=False
+        x=0.5, y=0.15, font_size=32, showarrow=False
     )
     
     fig.update_layout(
         height=300, 
         margin=dict(l=30, r=30, t=50, b=30),
-        title={'text': title_text, 'x': 0.5, 'y': 0.95}
+        title={'text': f"<b>{title_text}</b>", 'x': 0.5, 'y': 0.95}
     )
     return fig
 
 with g1:
-    st.plotly_chart(create_concentric_gauge(current_kwh, led_kwh, "Energy Savings", "Consumption (kWh)", suffix=" kWh", dtick_val=25000), use_container_width=True)
+    st.plotly_chart(create_concentric_gauge(led_kwh, current_kwh, "Energy Savings", "Consumption (kWh)", suffix=" kWh", max_range=200000, dtick_val=25000), use_container_width=True)
 with g2:
-    st.plotly_chart(create_concentric_gauge(current_cost, led_cost, "Cost Savings", "Expenditure (£)", "£", dtick_val=5000), use_container_width=True)
+    st.plotly_chart(create_concentric_gauge(led_cost, current_cost, "Cost Savings", "Expenditure (£)", "£", max_range=60000, dtick_val=5000), use_container_width=True)
 with g3:
-    st.plotly_chart(create_concentric_gauge(current_co2, led_co2, "Emissions Reduction", "Emissions (T CO₂e)", suffix=" T CO₂e", dtick_val=5), use_container_width=True)
+    st.plotly_chart(create_concentric_gauge(led_co2, current_co2, "Emissions Reduction", "Emissions (T CO₂e)", suffix=" T CO₂e", max_range=50, dtick_val=5), use_container_width=True)
 
 
 st.subheader("Savings Contribution by Area")
@@ -389,6 +390,7 @@ if not positive_area_savings.empty:
         positive_area_savings, x='Savings (£)', y='Area', orientation='h',
         text='Savings (£)', color='Savings (£)', color_continuous_scale=px.colors.sequential.Greens
     )
+    # DEFINITIVE FIX: Force text outside to guarantee no rotation
     fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='outside')
     fig_bar.update_layout(
         height=bar_chart_height,
@@ -396,7 +398,8 @@ if not positive_area_savings.empty:
         xaxis_title="Annual Savings (£)", yaxis_title=None,
         uniformtext_minsize=8, uniformtext_mode='hide',
         yaxis={'categoryorder':'total ascending'}, coloraxis_showscale=False,
-        xaxis_range=[0, positive_area_savings['Savings (£)'].max() * 1.2]
+        # Extend the x-axis to make room for the outside text
+        xaxis_range=[0, positive_area_savings['Savings (£)'].max() * 1.25]
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 else:
