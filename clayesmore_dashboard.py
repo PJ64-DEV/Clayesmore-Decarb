@@ -217,14 +217,13 @@ st.sidebar.number_input(
     step=1.0, format="%.0f", key="days_per_year"
 )
 
-# FIXED: Replaced help parameter with a stable st.markdown inside the expander
-with st.sidebar.expander("💡 Detailed Usage"):
-    st.markdown("_Adjust the average hours of use per day for each area._")
-    for area in UNIQUE_AREAS:
-        st.sidebar.number_input(
-            f"{area}", min_value=0.5, max_value=24.0,
-            step=0.5, format="%.1f", key=f"hours_{area}"
-        )
+st.sidebar.subheader("💡 Detailed Usage")
+st.sidebar.markdown("_Adjust the average hours of use per day for each area._")
+for area in UNIQUE_AREAS:
+    st.sidebar.number_input(
+        f"{area}", min_value=0.5, max_value=24.0,
+        step=0.5, format="%.1f", key=f"hours_{area}"
+    )
 
 st.sidebar.divider()
 st.sidebar.markdown("### Funding Assumptions")
@@ -305,31 +304,43 @@ st.divider()
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
 
-# REDESIGNED Gauge Charts for the "overlap" effect
+# NEW: Redesigned Gauge Charts for the "overlap" effect
 st.subheader("Visual Comparison: Current vs. Estimated")
 g1, g2, g3 = st.columns(3)
 
 def create_gauge(savings, title, max_val, prefix="", suffix=""):
-    fig = go.Figure(go.Indicator(
-        mode="number",
-        value=savings,
-        number={'prefix': prefix, 'suffix': suffix, 'font': {'size': 40}, 'valueformat': '.1f'},
-        title={'text': title, 'font': {'size': 24}},
-        domain={'x': [0, 1], 'y': [0, 1]}
-    ))
+    fig = go.Figure()
+
+    # Add the main gauge with the red and green zones
     fig.add_trace(go.Indicator(
         mode='gauge',
-        value=savings,
+        value=savings, # The needle will point to the savings value
         gauge={
             'shape': 'angular',
-            'bar': {'color': 'green', 'thickness': 0.8}, # This is the main green bar
             'axis': {'range': [0, max_val * 1.1], 'visible': False},
+            'bar': {'color': 'rgba(0,0,0,0.3)', 'thickness': 0.2}, # A subtle needle
+            'bgcolor': 'white',
+            'borderwidth': 2,
+            'bordercolor': 'white',
             'steps': [
-                {'range': [0, max_val], 'color': 'rgba(232, 17, 35, 0.7)', 'thickness': 1.0},
+                {'range': [0, savings], 'color': '#2ca02c', 'thickness': 0.8}, # Green bar for savings
+                {'range': [savings, max_val], 'color': '#d62728', 'thickness': 0.8}, # Red bar for remaining
             ],
         }
     ))
-    fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+
+    # Add annotations for the text, giving us full control
+    fig.add_annotation(
+        text=f"{prefix}{savings:,.2f}{suffix}",
+        x=0.5, y=0.5, font_size=40, showarrow=False
+    )
+    fig.add_annotation(
+        text=title,
+        x=0.5, y=0.35, font_size=20, showarrow=False,
+        font={'color': 'gray'}
+    )
+    
+    fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
     return fig
 
 with g1:
@@ -354,14 +365,16 @@ if not positive_area_savings.empty:
         positive_area_savings, x='Savings (£)', y='Area', orientation='h',
         text='Savings (£)', color='Savings (£)', color_continuous_scale=px.colors.sequential.Greens
     )
-    # This ensures text is always horizontal and outside the bar if it doesn't fit
-    fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='auto')
+    # DEFINITIVE FIX: Force text outside to guarantee no rotation
+    fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='outside')
     fig_bar.update_layout(
         height=bar_chart_height,
         title_text="Breakdown of Estimated Annual Savings",
         xaxis_title="Annual Savings (£)", yaxis_title=None,
         uniformtext_minsize=8, uniformtext_mode='hide',
-        yaxis={'categoryorder':'total ascending'}, coloraxis_showscale=False
+        yaxis={'categoryorder':'total ascending'}, coloraxis_showscale=False,
+        # Extend the x-axis to make room for the outside text
+        xaxis_range=[0, positive_area_savings['Savings (£)'].max() * 1.15]
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 else:
