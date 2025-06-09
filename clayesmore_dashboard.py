@@ -95,7 +95,7 @@ WC,16W,7,18,0.13,8,220,222,£55.44,0.05
 WC,2X18W,32,40,1.28,8,220,2253,£563.20,0.52
 WC,58W,1,64,0.06,8,220,113,£28.16,0.03
 PROPOSED FITTINGS
-Area,Lamp replacement,Quantity,Wattage,kW/Hour,Hours per Day,Days,Total kWh Per Annum,Proposed Running Cost,CO2 Tns
+Area,Lamp replacement,Quantity,Wattage,kW/Hour,Hours per Day,Days,Total kWh Per annum,Proposed Running Cost,CO2 Tns
 CIRCULATION,70W PENDANT,7,70,0.49,4,220,431,£107.80,0.10
 CIRCULATION,16W PANEL,67,16,1.07,4,220,943,£235.84,0.22
 CIRCULATION,10W BULKHEAD,46,10,0.46,4,220,405,£101.20,0.09
