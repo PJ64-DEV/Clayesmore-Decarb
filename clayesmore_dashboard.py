@@ -9,8 +9,7 @@ from io import StringIO
 # PAGE CONFIGURATION
 # =================================================================================================
 st.set_page_config(
-    page_title="Clayesmore School Proposal", # Updated Title
-    # page_icon removed
+    page_title="Clayesmore School Proposal",
     layout="wide"
 )
 
@@ -304,43 +303,34 @@ st.divider()
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
 
-# NEW: Gauge Charts
+# NEW: Redesigned Gauge Charts
 st.subheader("Visual Comparison: Current vs. Estimated")
 g1, g2, g3 = st.columns(3)
+
+def create_gauge(value, title, max_val, prefix=""):
+    return go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        number={'prefix': prefix, 'font': {'size': 36}},
+        title={'text': title, 'font': {'size': 24}},
+        gauge={
+            'axis': {'range': [0, max_val * 1.1], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "rgba(0,0,0,0)"}, # Invisible main bar
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, value], 'color': 'green'},
+                {'range': [value, max_val], 'color': 'rgba(232, 17, 35, 0.7)'} # Red zone for savings
+            ],
+        }))
+
 with g1:
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = led_kwh,
-        title = {'text': "Energy (kWh)"},
-        delta = {'reference': current_kwh, 'relative': False},
-        gauge = {'axis': {'range': [None, current_kwh * 1.1]},
-                 'bar': {'color': "green"},
-                 'steps' : [{'range': [current_kwh * 0.8, current_kwh], 'color': "lightgray"}],
-                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_kwh}}))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(create_gauge(led_kwh, "Energy (kWh)", current_kwh), use_container_width=True)
 with g2:
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = led_cost,
-        number = {'prefix': "£"},
-        title = {'text': "Cost (£)"},
-        delta = {'reference': current_cost, 'relative': False},
-        gauge = {'axis': {'range': [None, current_cost * 1.1]},
-                 'bar': {'color': "green"},
-                 'steps' : [{'range': [current_cost * 0.8, current_cost], 'color': "lightgray"}],
-                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_cost}}))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(create_gauge(led_cost, "Cost (£)", current_cost, "£"), use_container_width=True)
 with g3:
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = led_co2,
-        title = {'text': "Emissions (T CO₂e)"},
-        delta = {'reference': current_co2, 'relative': False},
-        gauge = {'axis': {'range': [None, current_co2 * 1.1]},
-                 'bar': {'color': "green"},
-                 'steps' : [{'range': [current_co2 * 0.8, current_co2], 'color': "lightgray"}],
-                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_co2}}))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(create_gauge(led_co2, "Emissions (T CO₂e)", current_co2), use_container_width=True)
 
 st.subheader("Savings Contribution by Area")
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
@@ -349,7 +339,7 @@ positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
 
 if not positive_area_savings.empty:
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
-    bar_chart_height = 450 + (len(positive_area_savings) * 25) # Increased vertical space
+    bar_chart_height = 500 + (len(positive_area_savings) * 25) # Further increased vertical space
 
     fig_bar = px.bar(
         positive_area_savings, x='Savings (£)', y='Area', orientation='h',
