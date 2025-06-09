@@ -304,51 +304,38 @@ st.divider()
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
 
-# REDESIGNED Gauge Charts for the concentric "overlap" effect
+# REDESIGNED Gauge Charts using the Donut Chart method
 st.subheader("Visual Comparison: Current vs. Estimated")
 g1, g2, g3 = st.columns(3)
 
-def create_concentric_gauge(new_val, current_val, explainer_text, title_text, prefix="", suffix="", dtick_val=None, max_range=None):
+def create_donut_gauge(new_val, current_val, explainer_text, title_text, prefix="", suffix="", dtick_val=None, max_range=None):
     if max_range is None:
         max_range = current_val * 1.1 if current_val > 0 else 1
     
-    fig = go.Figure()
-
-    # Layer 1: White background with visible ticks
-    fig.add_trace(go.Indicator(
-        mode='gauge',
-        value=current_val, # This layer shows the full range
-        domain={'x': [0, 1], 'y': [0, 1]},
-        gauge={
-            'shape': 'angular',
-            'axis': {'range': [0, max_range], 'tickwidth': 2, 'tickcolor': "darkgray", 'dtick': dtick_val},
-            'bar': {'color': 'white', 'thickness': 1.0},
-        }
-    ))
-
-    # Layer 2: Red bar for current value
-    fig.add_trace(go.Indicator(
-        mode='gauge',
-        value=current_val,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        gauge={
-            'shape': 'angular',
-            'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': 'rgba(214, 39, 40, 0.8)', 'thickness': 0.8}, # Slightly thinner
-        }
-    ))
+    # Calculate slice values
+    green_slice = new_val
+    red_slice = current_val - new_val
+    gray_slice = max_range - current_val
     
-    # Layer 3: Green bar for new value
-    fig.add_trace(go.Indicator(
-        mode='gauge',
-        value=new_val,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        gauge={
-            'shape': 'angular',
-            'axis': {'range': [0, max_range], 'visible': False},
-            'bar': {'color': '#2ca02c', 'thickness': 0.6}, # Thinnest
-        }
-    ))
+    # Ensure no negative slices if new_val exceeds current_val
+    if red_slice < 0:
+        green_slice = current_val
+        red_slice = 0
+
+    values = [green_slice, red_slice, gray_slice, max_range] # Last value is for the hidden bottom half
+    colors = ['#2ca02c', '#d62728', '#f0f2f6', 'rgba(0,0,0,0)'] # Green, Red, Gray, Transparent
+    
+    fig = go.Figure(data=[go.Pie(
+        values=values,
+        marker_colors=colors,
+        hole=0.6,
+        sort=False,
+        direction='clockwise',
+        rotation=90,
+        showlegend=False,
+        hoverinfo='none',
+        textinfo='none'
+    )])
 
     # Add annotations for the text, placed below the gauge arc
     savings = current_val - new_val
@@ -359,7 +346,7 @@ def create_concentric_gauge(new_val, current_val, explainer_text, title_text, pr
     )
     fig.add_annotation(
         text=f"<b>{prefix}{savings:,.2f}{suffix}</b>",
-        x=0.5, y=0.15, font_size=32, showarrow=False
+        x=0.5, y=0.20, font_size=32, showarrow=False
     )
     
     fig.update_layout(
@@ -370,11 +357,11 @@ def create_concentric_gauge(new_val, current_val, explainer_text, title_text, pr
     return fig
 
 with g1:
-    st.plotly_chart(create_concentric_gauge(led_kwh, current_kwh, "Energy Savings", "Consumption (kWh)", suffix=" kWh", max_range=200000, dtick_val=25000), use_container_width=True)
+    st.plotly_chart(create_donut_gauge(led_kwh, current_kwh, "Energy Savings", "Consumption (kWh)", suffix=" kWh", max_range=200000), use_container_width=True)
 with g2:
-    st.plotly_chart(create_concentric_gauge(led_cost, current_cost, "Cost Savings", "Expenditure (£)", "£", max_range=60000, dtick_val=5000), use_container_width=True)
+    st.plotly_chart(create_donut_gauge(led_cost, current_cost, "Cost Savings", "Expenditure (£)", "£", max_range=60000), use_container_width=True)
 with g3:
-    st.plotly_chart(create_concentric_gauge(led_co2, current_co2, "Emissions Reduction", "Emissions (T CO₂e)", suffix=" T CO₂e", max_range=50, dtick_val=5), use_container_width=True)
+    st.plotly_chart(create_donut_gauge(led_co2, current_co2, "Emissions Reduction", "Emissions (T CO₂e)", suffix=" T CO₂e", max_range=50), use_container_width=True)
 
 
 st.subheader("Savings Contribution by Area")
