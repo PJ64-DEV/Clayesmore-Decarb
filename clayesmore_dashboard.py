@@ -217,8 +217,9 @@ st.sidebar.number_input(
     step=1.0, format="%.0f", key="days_per_year"
 )
 
-# IMPROVED: Added help tooltip for clarity
-with st.sidebar.expander("💡 Detailed Usage", help="Adjust the average hours of use per day for each area."):
+# FIXED: Replaced help parameter with a stable st.markdown inside the expander
+with st.sidebar.expander("💡 Detailed Usage"):
+    st.markdown("_Adjust the average hours of use per day for each area._")
     for area in UNIQUE_AREAS:
         st.sidebar.number_input(
             f"{area}", min_value=0.5, max_value=24.0,
@@ -304,37 +305,39 @@ st.divider()
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
 
-# NEW: Redesigned Gauge Charts for visual impact
+# REDESIGNED Gauge Charts for the "overlap" effect
 st.subheader("Visual Comparison: Current vs. Estimated")
 g1, g2, g3 = st.columns(3)
 
-def create_gauge(value, savings, title, max_val, prefix="", suffix=""):
+def create_gauge(savings, title, max_val, prefix="", suffix=""):
     fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=value,
-        number={'prefix': prefix, 'suffix': suffix, 'font': {'size': 36}},
+        mode="number",
+        value=savings,
+        number={'prefix': prefix, 'suffix': suffix, 'font': {'size': 40}, 'valueformat': '.1f'},
         title={'text': title, 'font': {'size': 24}},
-        delta={'reference': max_val, 'valueformat': '.1f'}, # Shows savings underneath
+        domain={'x': [0, 1], 'y': [0, 1]}
+    ))
+    fig.add_trace(go.Indicator(
+        mode='gauge',
+        value=savings,
         gauge={
-            'axis': {'range': [0, max_val * 1.1]},
+            'shape': 'angular',
             'bar': {'color': 'green', 'thickness': 0.8}, # This is the main green bar
-            'bgcolor': 'white',
-            'borderwidth': 2,
-            'bordercolor': 'white', # White border for "pop"
+            'axis': {'range': [0, max_val * 1.1], 'visible': False},
             'steps': [
-                # A single red step acts as the background, creating the overlap effect
-                {'range': [0, max_val], 'color': 'rgba(232, 17, 35, 0.7)', 'thickness': 1.0}, 
+                {'range': [0, max_val], 'color': 'rgba(232, 17, 35, 0.7)', 'thickness': 1.0},
             ],
-        }))
-    fig.update_layout(height=300) # Give gauges a bit more vertical space
+        }
+    ))
+    fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
     return fig
 
 with g1:
-    st.plotly_chart(create_gauge(led_kwh, estimated_savings_kwh, "Energy Savings", current_kwh, suffix=" kWh"), use_container_width=True)
+    st.plotly_chart(create_gauge(estimated_savings_kwh, "Energy Savings", current_kwh, suffix=" kWh"), use_container_width=True)
 with g2:
-    st.plotly_chart(create_gauge(led_cost, estimated_savings_cost, "Cost Savings", current_cost, "£"), use_container_width=True)
+    st.plotly_chart(create_gauge(estimated_savings_cost, "Cost Savings", current_cost, "£"), use_container_width=True)
 with g3:
-    st.plotly_chart(create_gauge(led_co2, estimated_savings_co2, "Emissions Savings", current_co2, suffix=" T CO₂e"), use_container_width=True)
+    st.plotly_chart(create_gauge(estimated_savings_co2, "Emissions Savings", current_co2, suffix=" T CO₂e"), use_container_width=True)
 
 
 st.subheader("Savings Contribution by Area")
@@ -344,7 +347,7 @@ positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
 
 if not positive_area_savings.empty:
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
-    # Further increased vertical space for the bar chart
+    # Increased vertical space for the bar chart
     bar_chart_height = 500 + (len(positive_area_savings) * 30) 
 
     fig_bar = px.bar(
