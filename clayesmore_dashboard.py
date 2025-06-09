@@ -9,8 +9,8 @@ from io import StringIO
 # PAGE CONFIGURATION
 # =================================================================================================
 st.set_page_config(
-    page_title="Clayesmore School LED Proposal",
-    page_icon="💡",
+    page_title="Clayesmore School Proposal", # Updated Title
+    # page_icon removed
     layout="wide"
 )
 
@@ -180,7 +180,6 @@ def calculate_metrics(df, hours_map, days, cost_per_kwh):
 
 # --- App Constants & Initialization ---
 df_existing_base, df_proposed_base = load_and_process_data()
-PROJECT_NAME = "Clayesmore School"
 KG_CO2_PER_KWH = 0.233
 PROJECT_INSTALL_COST = 155915.00
 DEFAULT_HOURS_MAP = df_proposed_base.groupby('Area')['Hours per Day'].first().to_dict()
@@ -196,10 +195,9 @@ def set_defaults():
         st.session_state[f"hours_{area}"] = float(hours)
 
 # This is the very first thing in the script's execution
-# It checks if the reset button was clicked in the *previous* run
 if st.sidebar.button("Reset Defaults", use_container_width=True):
     set_defaults()
-    st.rerun() # Use the correct, modern rerun function
+    st.rerun()
 
 # Initialize state if it's the first ever run
 if 'cost_per_kwh' not in st.session_state:
@@ -258,9 +256,9 @@ net_cash_flow = estimated_savings_cost - annual_funding_cost
 payback_period_years = PROJECT_INSTALL_COST / estimated_savings_cost if estimated_savings_cost > 0 else float('inf')
 
 # === MAIN DASHBOARD LAYOUT ===
-st.title(f"💡 {PROJECT_NAME} Energy & Cost Savings Proposal")
+st.title("Clayesmore School")
+st.subheader("Energy & Cost Savings Proposal")
 st.markdown("An interactive proposal for a full-site LED lighting upgrade. Use the sidebar to adjust assumptions and see the live impact.")
-st.header("Executive Summary")
 st.markdown("---")
 
 # Tier 1: Current
@@ -283,7 +281,6 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Energy Reduction", f"{abs(estimated_savings_kwh):,.0f} kWh")
 col2.metric("Carbon Reduction", f"{abs(estimated_savings_co2):,.1f} T CO₂e")
 col3.metric("Expenditure Saving", f"£{abs(estimated_savings_cost):,.0f}")
-# Prominent % reduction in the 4th column
 percent_reduction = (estimated_savings_kwh / current_kwh * 100) if current_kwh > 0 else 0
 col4.metric("Overall Reduction", f"{percent_reduction:.1f}%")
 
@@ -298,8 +295,7 @@ if net_cash_flow >= 0:
     col4.metric("Net Annual Cash Flow", f"+ £{net_cash_flow:,.0f}")
 else:
     col4.metric("Net Annual Cash Flow", f"- £{abs(net_cash_flow):,.0f}")
-# Payback Period / ROI
-if payback_period_years <= 20: # Only show if payback is reasonable
+if payback_period_years <= 20:
     col5.metric("Payback Period", f"{payback_period_years:.1f} Years")
 else:
     col5.metric("Payback Period", "N/A")
@@ -307,36 +303,65 @@ st.divider()
 
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
+
+# NEW: Gauge Charts
+st.subheader("Visual Comparison: Current vs. Estimated")
+g1, g2, g3 = st.columns(3)
+with g1:
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = led_kwh,
+        title = {'text': "Energy (kWh)"},
+        delta = {'reference': current_kwh, 'relative': False},
+        gauge = {'axis': {'range': [None, current_kwh * 1.1]},
+                 'bar': {'color': "green"},
+                 'steps' : [{'range': [current_kwh * 0.8, current_kwh], 'color': "lightgray"}],
+                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_kwh}}))
+    st.plotly_chart(fig, use_container_width=True)
+with g2:
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = led_cost,
+        number = {'prefix': "£"},
+        title = {'text': "Cost (£)"},
+        delta = {'reference': current_cost, 'relative': False},
+        gauge = {'axis': {'range': [None, current_cost * 1.1]},
+                 'bar': {'color': "green"},
+                 'steps' : [{'range': [current_cost * 0.8, current_cost], 'color': "lightgray"}],
+                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_cost}}))
+    st.plotly_chart(fig, use_container_width=True)
+with g3:
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = led_co2,
+        title = {'text': "Emissions (T CO₂e)"},
+        delta = {'reference': current_co2, 'relative': False},
+        gauge = {'axis': {'range': [None, current_co2 * 1.1]},
+                 'bar': {'color': "green"},
+                 'steps' : [{'range': [current_co2 * 0.8, current_co2], 'color': "lightgray"}],
+                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': current_co2}}))
+    st.plotly_chart(fig, use_container_width=True)
+
+st.subheader("Savings Contribution by Area")
 area_savings = (df_existing_calc.groupby('Area')['Cost'].sum() - df_proposed_calc.groupby('Area')['Cost'].sum()).reset_index()
 area_savings.columns = ['Area', 'Savings (£)']
 positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
 
 if not positive_area_savings.empty:
-    st.subheader("Savings Contribution by Area")
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
-    
-    # Give the chart a fixed height to provide more space
-    bar_chart_height = 400 + (len(positive_area_savings) * 20) # Dynamic height based on number of areas
+    bar_chart_height = 450 + (len(positive_area_savings) * 25) # Increased vertical space
 
     fig_bar = px.bar(
-        positive_area_savings,
-        x='Savings (£)',
-        y='Area',
-        orientation='h',
-        text='Savings (£)',
-        color='Savings (£)',
-        color_continuous_scale=px.colors.sequential.Greens
+        positive_area_savings, x='Savings (£)', y='Area', orientation='h',
+        text='Savings (£)', color='Savings (£)', color_continuous_scale=px.colors.sequential.Greens
     )
     fig_bar.update_traces(texttemplate='£%{text:,.0f}', textposition='auto')
     fig_bar.update_layout(
         height=bar_chart_height,
         title_text="Breakdown of Estimated Annual Savings",
-        xaxis_title="Annual Savings (£)",
-        yaxis_title=None,
-        uniformtext_minsize=8,
-        uniformtext_mode='hide',
-        yaxis={'categoryorder':'total ascending'},
-        coloraxis_showscale=False
+        xaxis_title="Annual Savings (£)", yaxis_title=None,
+        uniformtext_minsize=8, uniformtext_mode='hide',
+        yaxis={'categoryorder':'total ascending'}, coloraxis_showscale=False
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 else:
