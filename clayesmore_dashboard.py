@@ -304,51 +304,56 @@ st.divider()
 # === VISUAL ANALYSIS ===
 st.header("Visual Analysis")
 
-# NEW: Redesigned Gauge Charts for the "overlap" effect
-st.subheader("Visual Comparison: Current vs. Estimated")
+# REDESIGNED Gauge Charts for perfect text placement
+st.subheader("Visual Comparison of Annual Savings")
 g1, g2, g3 = st.columns(3)
 
-def create_gauge(savings, title, max_val, prefix="", suffix=""):
+def create_gauge(new_value, old_value, title, prefix="", suffix=""):
+    savings = old_value - new_value
     fig = go.Figure()
 
-    # Add the main gauge with the red and green zones
     fig.add_trace(go.Indicator(
         mode='gauge',
-        value=savings, # The needle will point to the savings value
+        value=new_value,
+        domain={'x': [0, 1], 'y': [0, 1]},
         gauge={
             'shape': 'angular',
-            'axis': {'range': [0, max_val * 1.1], 'visible': False},
-            'bar': {'color': 'rgba(0,0,0,0.3)', 'thickness': 0.2}, # A subtle needle
+            'axis': {'range': [0, old_value * 1.1], 'visible': False},
+            'bar': {'color': 'rgba(0,0,0,0.3)', 'thickness': 0.15},
             'bgcolor': 'white',
-            'borderwidth': 2,
-            'bordercolor': 'white',
+            'borderwidth': 0,
             'steps': [
-                {'range': [0, savings], 'color': '#2ca02c', 'thickness': 0.8}, # Green bar for savings
-                {'range': [savings, max_val], 'color': '#d62728', 'thickness': 0.8}, # Red bar for remaining
+                {'range': [0, new_value], 'color': '#2ca02c', 'thickness': 0.8}, # Green bar for new value
+                {'range': [new_value, old_value], 'color': '#d62728', 'thickness': 0.8}, # Red bar for savings
             ],
+            'threshold': {
+                'line': {'color': "white", 'width': 5},
+                'thickness': 1.0,
+                'value': new_value
+            }
         }
     ))
-
+    
     # Add annotations for the text, giving us full control
     fig.add_annotation(
-        text=f"{prefix}{savings:,.2f}{suffix}",
-        x=0.5, y=0.5, font_size=40, showarrow=False
-    )
-    fig.add_annotation(
         text=title,
-        x=0.5, y=0.35, font_size=20, showarrow=False,
+        x=0.5, y=0.45, font_size=20, showarrow=False,
         font={'color': 'gray'}
     )
+    fig.add_annotation(
+        text=f"{prefix}{savings:,.2f}{suffix}",
+        x=0.5, y=0.25, font_size=40, showarrow=False
+    )
     
-    fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
+    fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
     return fig
 
 with g1:
-    st.plotly_chart(create_gauge(estimated_savings_kwh, "Energy Savings", current_kwh, suffix=" kWh"), use_container_width=True)
+    st.plotly_chart(create_gauge(led_kwh, current_kwh, "Energy Savings", suffix=" kWh"), use_container_width=True)
 with g2:
-    st.plotly_chart(create_gauge(estimated_savings_cost, "Cost Savings", current_cost, "£"), use_container_width=True)
+    st.plotly_chart(create_gauge(led_cost, current_cost, "Cost Savings", "£"), use_container_width=True)
 with g3:
-    st.plotly_chart(create_gauge(estimated_savings_co2, "Emissions Savings", current_co2, suffix=" T CO₂e"), use_container_width=True)
+    st.plotly_chart(create_gauge(led_co2, current_co2, "Emissions Savings", suffix=" T CO₂e"), use_container_width=True)
 
 
 st.subheader("Savings Contribution by Area")
@@ -358,7 +363,6 @@ positive_area_savings = area_savings[area_savings['Savings (£)'] > 0]
 
 if not positive_area_savings.empty:
     positive_area_savings = positive_area_savings.sort_values(by='Savings (£)', ascending=True)
-    # Increased vertical space for the bar chart
     bar_chart_height = 500 + (len(positive_area_savings) * 30) 
 
     fig_bar = px.bar(
